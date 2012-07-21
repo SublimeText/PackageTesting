@@ -59,7 +59,6 @@ class TestsState(object):
     def __init__(self):
         self.test_suite_to_run = ''
         self.test_view = None
-        self.test_suite_to_run = ''
         self._suites = []
         self.settings = TestsSettings()
 
@@ -93,7 +92,11 @@ class TestsState(object):
         self._suites = []
 
 
-tests_state = TestsState()
+# Silence errors.
+try:
+    tests_state = TestsState()
+except:
+    pass
 
 
 def print_to_view(view, obtain_content):
@@ -106,8 +109,11 @@ def print_to_view(view, obtain_content):
 
 class PackageTestingDisplayTestsCommand(sublime_plugin.WindowCommand):
     def run(self):
-        tests_state.reset()
-        self.window.show_quick_panel(sorted(tests_state.settings.test_suites.keys()), self.run_suite)
+        try:
+            tests_state.reset()
+            self.window.show_quick_panel(sorted(tests_state.settings.test_suites.keys()), self.run_suite)
+        except NameError, e:
+            sublime.status_message("PackageTesting: Could not initialize settings.")
 
     def run_suite(self, idx):
         suite_name = sorted(tests_state.settings.test_suites.keys())[idx]
@@ -128,6 +134,9 @@ class PackageTestingRunSimpleTestsCommand(sublime_plugin.WindowCommand):
 
 class PackageTestingRunDataFileBasedTestsCommand(sublime_plugin.WindowCommand):
     def run(self, suite_name):
+        if not os.path.exists(tests_state.settings.path_to_data):
+            sublime.status_message("PackageTesting: Cannot open data file.")
+            return
         self.window.open_file(tests_state.settings.path_to_data)
 
 
@@ -136,17 +145,24 @@ class PackageTestingTestDataDispatcher(sublime_plugin.EventListener):
         if not tests_state.must_run_tests:
             return
 
-        with pushd(tests_state.settings.path_to_package):
-            tests_state.test_view = view
-            suite = unittest.TestLoader().loadTestsFromNames(tests_state.iter_module_names())
+        try:
+            with pushd(tests_state.settings.path_to_package):
+                tests_state.test_view = view
+                suite = unittest.TestLoader().loadTestsFromNames(tests_state.iter_module_names())
 
-            bucket = StringIO.StringIO()
-            unittest.TextTestRunner(stream=bucket, verbosity=1).run(suite)
+                bucket = StringIO.StringIO()
+                unittest.TextTestRunner(stream=bucket, verbosity=1).run(suite)
 
-            v = print_to_view(view.window().new_file(), bucket.getvalue)
-
+                print_to_view(view.window().new_file(), bucket.getvalue)
+        except AttributeError, e:
+            sublime.status_message("PackageTesting: Can't find test module(s).")
+            self.clean_up(view)
+            return
         # Make this outside the with block or the __exit__ code will never
         # be executed due to the 'close' command.
+        self.clean_up(view)
+
+    def clean_up(self, data_view):
         # In this order, or Sublime Text will fail.
-        v.window().focus_view(view)
-        view.window().run_command('close')
+        sublime.active_window().focus_view(data_view)
+        data_view.window().run_command('close')
